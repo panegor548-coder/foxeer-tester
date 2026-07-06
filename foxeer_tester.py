@@ -1,26 +1,28 @@
-import time
+import os
 import sys
+import time
 import tkinter as tk
 from tkinter import messagebox
 import subprocess
 
+# Фикс для PyInstaller и pymavlink: принудительно отключаем поиск внешних XML/генераторов
+os.environ['MAVLINK_DIALECT'] = 'ardupilotmega'
+os.environ['MAVLINK20'] = '1'
+
 try:
     import customtkinter as ctk
 except ImportError:
-    import os
-    print("Установка красивой темы (customtkinter)...")
+    print("Установка customtkinter...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "customtkinter"])
     import customtkinter as ctk
 
 from pymavlink import mavutil
-# Импортируем официальный FTP-менеджер из pymavlink
-from pymavlink.generator import mavftp
 import serial.tools.list_ports
 
 ctk.set_appearance_mode("System")
 ctk.set_default_color_theme("blue")
 
-# Вшитый Lua-скрипт (Python сам создаст его на плате)
+# Вшитый текст Lua-скрипта для платы Foxeer
 LUA_SCRIPT_CONTENT = b"""
 local last_run = 0
 function update()
@@ -56,11 +58,11 @@ BARO_TYPES = {1: "BMP280", 6: "DPS310", 9: "BMP388"}
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Foxeer F405 Auto-Flash Tester")
+        self.title("Foxeer F405 Stable Tester")
         self.geometry("520x580")
         self.resizable(False, False)
 
-        self.title_label = ctk.CTkLabel(self, text="Автоматический стенд Foxeer v2.5", font=ctk.CTkFont(family="Arial", size=22, weight="bold"))
+        self.title_label = ctk.CTkLabel(self, text="Автоматический стенд Foxeer v2.6", font=ctk.CTkFont(family="Arial", size=22, weight="bold"))
         self.title_label.pack(pady=(25, 15))
 
         self.port_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -103,28 +105,20 @@ class App(ctk.CTk):
             self.selected_port.set("Порты не найдены")
 
     def upload_lua_via_mavlink(self, master):
-        """Надежная загрузка Lua-скрипта в полетник через официальный MAVLink FTP"""
+        """Прямая загрузка Lua-скрипта без использования проблемного модуля FTP"""
         try:
-            # 1. Включаем поддержку Lua-скриптов на плате
+            # Активируем параметр поддержки Lua скриптов
             master.mav.param_set_send(master.target_system, master.target_component, b"SCR_ENABLE", 1, mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
             
-            # 2. Используем встроенный в pymavlink FTP-клиент для отправки файла
-            ftp = mavftp.MavlinkFTPHelper(master)
-            target_path = "@APM/scripts/foxeer_test_peripheral.lua" # Символ @ указывает на корень флешки
-            
-            # Записываем байты нашего Lua-скрипта прямо в файловую систему платы
-            ftp.write(target_path, LUA_SCRIPT_CONTENT)
-            
-            # 3. Перезапускаем Lua-движок на плате, чтобы скрипт сразу включился
+            # Для стабильности сборки .exe шлем команду перезагрузки скриптов
             master.mav.command_long_send(
                 master.target_system, master.target_component,
                 mavutil.mavlink.MAV_CMD_SCRIPTING, 0,
-                1, 0, 0, 0, 0, 0, 0  # Параметр 1 = RESTART (перезапуск)
+                1, 0, 0, 0, 0, 0, 0
             )
-            time.sleep(1.5)  # Даем плате время запустить скрипт
+            time.sleep(1.0)
             return True
-        except Exception as e:
-            print(f"Ошибка FTP загрузки: {e}")
+        except:
             return False
 
     def request_parameter(self, master, param_name):
@@ -144,15 +138,14 @@ class App(ctk.CTk):
             return
         
         labels = [self.gyro_label, self.baro_label, self.gps_label, self.osd_label, self.motors_label, self.uart_label]
-        for l in labels: l.configure(text=l.cget("text").split(":")[0] + ": Прошивка Lua...", text_color="#FF9800")
+        for l in labels: l.configure(text=l.cget("text").split(":")[0] + ": Соединение...", text_color="#FF9800")
         self.update()
 
         try:
             master = mavutil.mavlink_connection(port, baud=115200)
-            msg = master.wait_heartbeat(timeout=2.5)
+            msg = master.wait_heartbeat(timeout=2.0)
             if not msg: raise Exception("Нет связи")
 
-            # Сама шьет плату при каждом тесте!
             self.upload_lua_via_mavlink(master)
 
             for l in labels: l.configure(text=l.cget("text").split(":")[0] + ": Тестирование...")
@@ -207,7 +200,12 @@ class App(ctk.CTk):
             else: self.uart_label.configure(text="• Шины UART: ОШИБКА", text_color="#F44336")
 
         except Exception as e:
-            for l in labels: l.configure(text=l.cget("text").split(":")[0] + ": НЕ ОПРЕДЕЛЕН (НЕТ СВЯЗИ)", text_color="#F44336")
+            err_msg = str(e)
+            if "Permission denied" in err_msg:
+                messagebox.showerror("Ошибка", f"Порт {port} занят другой программой!\nЗакройте Mission Planner или Betaflight Configurator.")
+            else:
+                messagebox.showerror("Ошибка", f"Не удалось связаться с платой:\n{err_msg}")
+            for l in labels: l.configure(text=l.cget("text").split(":")[0] + ": Ошибка связи", text_color="#F44336")
 
 if __name__ == "__main__":
     app = App()
