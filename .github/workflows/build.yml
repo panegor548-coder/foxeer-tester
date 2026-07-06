@@ -23,9 +23,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install pymavlink pyserial pyinstaller customtkinter
 
+    # Находим, где в системе лежит папка message_definitions, и заставляем PyInstaller вшить её внутрь EXE
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --noconsole foxeer_tester.py
+        $pymavlink_path = python -c "import pymavlink, os; print(os.path.dirname(pymavlink.__file__))"
+        echo "Pymavlink path found: $pymavlink_path"
+        pyinstaller --onefile --noconsole --add-data "$pymavlink_path/message_definitions;message_definitions" foxeer_tester.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
