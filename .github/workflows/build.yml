@@ -23,12 +23,12 @@ jobs:
         python -m pip install --upgrade pip
         pip install pymavlink pyserial pyinstaller customtkinter
 
-    # Находим, где в системе лежит папка message_definitions, и заставляем PyInstaller вшить её внутрь EXE
+    # Собираем со всеми потрохами библиотеки pymavlink, включая генераторы и диалекты
     - name: Build with PyInstaller
       run: |
         $pymavlink_path = python -c "import pymavlink, os; print(os.path.dirname(pymavlink.__file__))"
         echo "Pymavlink path found: $pymavlink_path"
-        pyinstaller --onefile --noconsole --add-data "$pymavlink_path/message_definitions;message_definitions" foxeer_tester.py
+        pyinstaller --onefile --noconsole --hidden-import=pymavlink --hidden-import=pymavlink.dialects --hidden-import=pymavlink.dialects.v20 --hidden-import=pymavlink.dialects.v20.ardupilotmega --add-data "$pymavlink_path;pymavlink" foxeer_tester.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
